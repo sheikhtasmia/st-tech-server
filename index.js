@@ -34,7 +34,7 @@ async function run() {
         const memberCollection = client.db("stTechDb").collection('members');
         const portfolioCollection = client.db("stTechDb").collection('projects');
         const UserWorkCollection = client.db("stTechDb").collection('Works');
-
+        // work post api
         app.post('/api/works', async (req, res) => {
             const data = req.body;
 
@@ -67,7 +67,7 @@ async function run() {
             }
         });
 
-
+        // works get api
         app.get('/api/works', async (req, res) => {
             try {
                 // Query Parameter থেকে 'email' নেওয়া হচ্ছে
@@ -94,7 +94,7 @@ async function run() {
             }
         });
 
-
+        // delete api
         app.delete('/api/works/:id', async (req, res) => {
             const id = req.params.id;
 
@@ -249,8 +249,34 @@ async function run() {
         // POST new member
         app.post('/members', async (req, res) => {
             const member = req.body;
-            const result = await memberCollection.insertOne(member);
-            res.send(result);
+
+            // Basic validation: name is required, description is optional
+            if (!member.name) {
+                return res.status(400).json({
+                    message: "মেম্বারের নাম আবশ্যক।"
+                });
+            }
+
+            try {
+                const newMember = {
+                    ...member,
+                    createdAt: new Date()
+                };
+
+                const result = await memberCollection.insertOne(newMember);
+
+                res.status(201).json({
+                    message: 'মেম্বার সফলভাবে যোগ হয়েছে।',
+                    insertedId: result.insertedId,
+                    data: newMember
+                });
+
+            } catch (error) {
+                console.error("Error adding member:", error);
+                res.status(500).json({
+                    message: 'ডাটাবেসে মেম্বার যোগ করতে ব্যর্থ হয়েছে।'
+                });
+            }
         });
 
 
@@ -267,6 +293,42 @@ async function run() {
             } catch (err) {
                 console.error(err);
                 res.status(500).send({ error: "Failed to delete member" });
+            }
+        });
+
+        // PATCH update member by ID
+        app.patch('/members/:id', verifyToken, verifyAdmin, async (req, res) => {
+            const id = req.params.id;
+            // বডি থেকে সব প্রয়োজনীয় ফিল্ড নিন
+            const { name, role, description, linkedin, portfolio } = req.body;
+
+            if (!ObjectId.isValid(id)) {
+                return res.status(400).json({ message: "অবৈধ আইডি ফরম্যাট।" });
+            }
+
+            try {
+                const filter = { _id: new ObjectId(id) };
+                const updatedDoc = {
+                    $set: {
+                        name,
+                        role,
+                        description,
+                        linkedin, // এটি যোগ করা হয়েছে
+                        portfolio // এটি যোগ করা হয়েছে
+                    }
+                };
+
+                const result = await memberCollection.updateOne(filter, updatedDoc);
+
+                res.status(200).json({
+                    message: 'সফলভাবে আপডেট হয়েছে।',
+                    matchedCount: result.matchedCount,
+                    modifiedCount: result.modifiedCount
+                });
+
+            } catch (error) {
+                console.error("Update Error:", error);
+                res.status(500).json({ message: 'সার্ভার ত্রুটি।' });
             }
         });
 
@@ -303,6 +365,36 @@ async function run() {
             }
         });
 
+
+        // PATCH update project by ID
+        app.patch('/projects/:id', verifyToken, verifyAdmin, async (req, res) => {
+            const id = req.params.id;
+            const data = req.body;
+            const filter = { _id: new ObjectId(id) };
+
+            const updatedDoc = {
+                $set: {
+                    brandName: data.brandName,
+                    facebook: data.facebook,
+                    website: data.website,
+                    Description: data.Description,
+                    brandLogo: data.brandLogo,
+                    thumbnail: data.thumbnail
+                }
+            };
+
+            try {
+                const result = await portfolioCollection.updateOne(filter, updatedDoc);
+                
+                if (result.matchedCount > 0) {
+                    res.send({ modifiedCount: result.modifiedCount, matchedCount: result.matchedCount });
+                } else {
+                    res.status(404).send({ message: "Project not found" });
+                }
+            } catch (error) {
+                res.status(500).send(error);
+            }
+        });
 
 
 
