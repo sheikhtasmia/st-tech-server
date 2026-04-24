@@ -5,14 +5,7 @@ const jwt = require("jsonwebtoken");
 require("dotenv").config();
 
 const app = express();
-app.use(cors({
-  origin: [
-    "http://localhost:5173",
-    "https://stechnest.com",
-    "https://www.stechnest.com"
-  ],
-  credentials: true
-}));
+app.use(cors());
 app.use(express.json());
 
 // MongoDB URI
