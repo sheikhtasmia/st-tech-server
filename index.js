@@ -25,77 +25,32 @@ const client = new MongoClient(uri, {
   },
 });
 
-// ====================== Helper Function ======================
-async function getCollections() {
-  if (!client.topology || !client.topology.isConnected()) {
-    await client.connect();
-  }
-  const db = client.db("stTechDb");
-  return {
-    userCollection: db.collection("user"),
-    memberCollection: db.collection("members"),
-    portfolioCollection: db.collection("projects"),
-    UserWorkCollection: db.collection("Works"),
-  };
-}
+async function run() {
+    try {
+        await client.connect();
 
-// ====================== JWT Middleware ======================
-const verifyToken = (req, res, next) => {
-  if (!req.headers.authorization) {
-    return res.status(401).send({ message: "unauthorized access" });
-  }
-  const token = req.headers.authorization.split(" ")[1];
-  jwt.verify(token, process.env.ACCESS_TOKEN_SECRET, (err, decoded) => {
-    if (err) return res.status(401).send({ message: "unauthorized access" });
-    req.decoded = decoded;
-    next();
-  });
-};
+        const userCollection = client.db("stTechDb").collection('user');
+        const memberCollection = client.db("stTechDb").collection('members');
+        const portfolioCollection = client.db("stTechDb").collection('projects');
+        const UserWorkCollection = client.db("stTechDb").collection('Works');
 
-// Admin Middleware
-const verifyAdmin = async (req, res, next) => {
-  try {
-    const { userCollection } = await getCollections();
-    const email = req.decoded.email;
-    const user = await userCollection.findOne({ email });
-    if (user?.role !== "admin") {
-      return res.status(403).send({ message: "forbidden access" });
-    }
-    next();
-  } catch (err) {
-    console.error("verifyAdmin error:", err);
-    res.status(500).send({ message: "Internal Server Error" });
-  }
-};
+        app.post('/api/works', async (req, res) => {
+            const data = req.body;
 
-// ====================== Routes ======================
+            if (!data.workName || !data.workCategory || !data.workDetails || !data.submitterName || !data.submitterEmail || !data.workLink) {
+                return res.status(400).json({
+                    message: "কাজের নাম, ক্যাটাগরি, বিবরণ, নাম, ইমেইল এবং কাজের লিঙ্ক আবশ্যক।"
+                });
+            }
 
-// Root
-app.get("/", (req, res) => {
-  res.send("ST Tech Backend is Running on Vercel (Serverless)!");
-});
+            try {
+                const newWork = {
+                    ...data,
+                    submissionDate: new Date(),
+                    status: 'pending'
+                };
 
-// ----------- Works -----------
-app.post("/api/works", async (req, res) => {
-  try {
-    const data = req.body;
-    if (
-      !data.workName ||
-      !data.workCategory ||
-      !data.workDetails ||
-      !data.submitterName ||
-      !data.submitterEmail ||
-      !data.workLink
-    ) {
-      return res
-        .status(400)
-        .json({ message: "কাজ জমা দিতে সব ইনপুট দিতে হবে।" });
-    }
-
-    const { UserWorkCollection } = await getCollections();
-
-    const newWork = { ...data, submissionDate: new Date(), status: "pending" };
-    const result = await UserWorkCollection.insertOne(newWork);
+                const result = await UserWorkCollection.insertOne(newWork);
 
     res.status(201).json({
       message: "কাজ সফলভাবে জমা হয়েছে।",
@@ -108,43 +63,65 @@ app.post("/api/works", async (req, res) => {
   }
 });
 
-app.get("/api/works", async (req, res) => {
-  try {
-    const email = req.query.email;
-    const filter = email ? { submitterEmail: email } : {};
 
-    const { UserWorkCollection } = await getCollections();
-    const works = await UserWorkCollection.find(filter)
-      .sort({ submissionDate: -1 })
-      .toArray();
+        app.get('/api/works', async (req, res) => {
+            try {
+                // Query Parameter থেকে 'email' নেওয়া হচ্ছে
+                const email = req.query.email;
 
-    res.json(works);
-  } catch (err) {
-    console.error("/api/works GET error:", err);
-    res.status(500).json({ message: "Internal Server Error" });
-  }
-});
+                let filter = {};
 
-app.delete("/api/works/:id", async (req, res) => {
-  try {
-    const id = req.params.id;
-    if (!ObjectId.isValid(id))
-      return res.status(400).json({ message: "Invalid Work ID" });
+                if (email) {
+                    filter = { submitterEmail: email };
+                    console.log(`Filtering works for user: ${email}`);
+                }
+                else {
+                    console.log("Fetching all works (Admin View).");
+                }
 
-    const { UserWorkCollection } = await getCollections();
-    const result = await UserWorkCollection.deleteOne({
-      _id: new ObjectId(id),
-    });
+                const works = await UserWorkCollection.find(filter).sort({ submissionDate: -1 }).toArray();
+                res.status(200).json(works);
 
-    if (result.deletedCount === 0)
-      return res.status(404).json({ message: "Work not found" });
+            } catch (error) {
+                console.error("Error fetching works:", error);
+                res.status(500).json({
+                    message: 'কাজের তালিকা আনতে ব্যর্থ হয়েছে।'
+                });
+            }
+        });
 
-    res.json({ message: "Work deleted", deletedId: id });
-  } catch (err) {
-    console.error("/api/works DELETE error:", err);
-    res.status(500).json({ message: "Internal Server Error" });
-  }
-});
+
+        app.delete('/api/works/:id', async (req, res) => {
+            const id = req.params.id;
+
+            if (!ObjectId.isValid(id)) {
+                return res.status(400).json({
+                    message: "অবৈধ কাজের আইডি ফরম্যাট। সঠিক ID দিন।"
+                });
+            }
+
+            try {
+                const query = { _id: new ObjectId(id) };
+                const result = await UserWorkCollection.deleteOne(query);
+
+                if (result.deletedCount === 0) {
+                    return res.status(404).json({
+                        message: "নির্দিষ্ট আইডি সহ কোনো কাজ পাওয়া যায়নি। মুছে ফেলা সম্ভব নয়।"
+                    });
+                }
+
+                res.status(200).json({
+                    message: 'কাজটি সফলভাবে মুছে ফেলা হয়েছে।',
+                    deletedId: id
+                });
+
+            } catch (error) {
+                console.error("Error deleting work:", error);
+                res.status(500).json({
+                    message: 'ডাটাবেস থেকে কাজটি মুছতে ব্যর্থ হয়েছে। অভ্যন্তরীণ সার্ভার ত্রুটি।'
+                });
+            }
+        });
 
 // ----------- JWT -----------
 app.post("/jwt", async (req, res) => {
@@ -251,65 +228,91 @@ app.get("/members/count", async (req, res) => {
   }
 });
 
-app.post("/members", async (req, res) => {
-  try {
-    const { memberCollection } = await getCollections();
-    const result = await memberCollection.insertOne(req.body);
-    res.json(result);
-  } catch (err) {
-    console.error("/members POST error:", err);
-    res.status(500).json({ message: "Internal Server Error" });
-  }
+
+
+        // POST new member
+        app.post('/members', async (req, res) => {
+            const member = req.body;
+            const result = await memberCollection.insertOne(member);
+            res.send(result);
+        });
+
+
+        // DELETE member by ID
+        app.delete('/members/:id', async (req, res) => {
+            const id = req.params.id;
+            try {
+                const result = await memberCollection.deleteOne({ _id: new ObjectId(id) });
+                if (result.deletedCount === 1) {
+                    res.send({ success: true });
+                } else {
+                    res.status(404).send({ error: "Member not found" });
+                }
+            } catch (err) {
+                console.error(err);
+                res.status(500).send({ error: "Failed to delete member" });
+            }
+        });
+
+
+
+        // portfolio related apis
+        app.get('/projects', async (req, res) => {
+            const result = await portfolioCollection.find().toArray();
+            res.send(result);
+        });
+
+
+        // POST new member
+        app.post('/projects', async (req, res) => {
+            const member = req.body;
+            const result = await portfolioCollection.insertOne(member);
+            res.send(result);
+        });
+
+
+        // DELETE member by ID
+        app.delete('/projects/:id', async (req, res) => {
+            const id = req.params.id;
+            try {
+                const result = await portfolioCollection.deleteOne({ _id: new ObjectId(id) });
+                if (result.deletedCount === 1) {
+                    res.send({ success: true });
+                } else {
+                    res.status(404).send({ error: "project not found" });
+                }
+            } catch (err) {
+                console.error(err);
+                res.status(500).send({ error: "Failed to delete project " });
+            }
+        });
+
+
+
+
+
+
+
+
+
+
+
+        // Send a ping to confirm a successful connection
+        await client.db("admin").command({ ping: 1 });
+        console.log("Pinged your deployment. You successfully connected to MongoDB!");
+    } finally {
+        // Ensures that the client will close when you finish/error
+        // await client.close();
+    }
+}
+run().catch(console.dir);
+
+
+
+app.get('/', (req, res) => {
+    res.send("st tech is sitting..")
 });
 
-app.delete("/members/:id", async (req, res) => {
-  try {
-    const { memberCollection } = await getCollections();
-    const result = await memberCollection.deleteOne({
-      _id: new ObjectId(req.params.id),
-    });
-    res.json({ success: result.deletedCount === 1 });
-  } catch (err) {
-    console.error("/members/:id DELETE error:", err);
-    res.status(500).json({ message: "Internal Server Error" });
-  }
+app.listen(port, () => {
+    console.log(`St Tech is running on port ${port}`);
 });
-
-// ----------- Projects -----------
-app.get("/projects", async (req, res) => {
-  try {
-    const { portfolioCollection } = await getCollections();
-    const result = await portfolioCollection.find().toArray();
-    res.json(result);
-  } catch (err) {
-    console.error("/projects GET error:", err);
-    res.status(500).json({ message: "Internal Server Error" });
-  }
-});
-
-app.post("/projects", async (req, res) => {
-  try {
-    const { portfolioCollection } = await getCollections();
-    const result = await portfolioCollection.insertOne(req.body);
-    res.json(result);
-  } catch (err) {
-    console.error("/projects POST error:", err);
-    res.status(500).json({ message: "Internal Server Error" });
-  }
-});
-
-app.delete("/projects/:id", async (req, res) => {
-  try {
-    const { portfolioCollection } = await getCollections();
-    const result = await portfolioCollection.deleteOne({
-      _id: new ObjectId(req.params.id),
-    });
-    res.json({ success: result.deletedCount === 1 });
-  } catch (err) {
-    console.error("/projects/:id DELETE error:", err);
-    res.status(500).json({ message: "Internal Server Error" });
-  }
-});
-
-// ====================== Export for Vercel ======================
-module.exports = (req, res) => app(req, res);
